@@ -237,22 +237,17 @@ def _add_cell_loop(structure, cb):
 
 
 def _add_symmetry_loop(structure, cb, wrap=False):
-    structure.group_atoms_by_symmetry()
-    data = sym.get_symmetry_dataset(structure)
-    eqd = dict((i, e) for i, e in enumerate(data["equivalent_atoms"]))
-    cb["_symmetry_space_group_name_H-M"] = str(data["international"])
-    cb["_symmetry_Int_Tables_number"] = str(data["number"])
-    ss_cols = [["_symmetry_equiv_pos_site_id", "_symmetry_equiv_pos_as_xyz"]]
+    origins = structure.origins
+    cb["_space_group_name_Hall"] = "P 1"
+    cb["_space_group_IT_number"] = 1
+    ss_cols = [["_space_group_symop_operation_xyz"]]
     ss_data = [
-        [
-            [str(i + 1) for i in range(len(data["rotations"]))],
             [
-                str(sym.Operation.get((r, t)))
-                for r, t in zip(data["rotations"], data["translations"])
-            ],
-        ]
+                ["+x,+y,+z"]
+            ]
     ]
     cb.AddCifItem((ss_cols, ss_data))
+
     a_rows = [
         [
             "_atom_site_label",
@@ -265,12 +260,12 @@ def _add_symmetry_loop(structure, cb, wrap=False):
         ]
     ]
     a_data = [
-        [str("%s%d" % (a.element_id, eqd[i])) for i, a in enumerate(structure)],
+        [str("%s%d" % (a.element_id, origins[i])) for i, a in enumerate(structure)],
         [str("%s%+d" % (a.element_id, a.ox if a.ox else 0)) for a in structure],
         ["%08f" % a.x for a in structure],
         ["%08f" % a.y for a in structure],
         ["%08f" % a.z for a in structure],
-        [str(data["wyckoffs"][i]) for i in range(len(structure))],
+        [str(site.wyckoff.symbol) for site in structure.sites],
         ["%08f" % a.occupancy for a in structure],
     ]
 
@@ -302,19 +297,20 @@ def _add_symmetry_loop(structure, cb, wrap=False):
 
 
 def _add_header(structure, cb):
-    form_sum = ""
-    for k, v in list(structure.comp.items()):
-        form_sum += "%s%s" % (k, v)
-
-    cb.AddCifItem(("_chemical_formula_sum", form_sum))
+    form_structural = " ".join([f"{k}{v}" for (k, v) in list(structure.comp.items())])
+    form_sum = "".join([f"{k}{v}" for (k, v) in list(structure.comp.items())])
+    cb.AddItem("_chemical_formula_structural", form_structural)
+    cb.AddItem("_chemical_formula_sum", form_sum)
 
 
 def _make_cif_block(structure, wrap=False):
+    conv_structure = structure.make_conventional(in_place=False)
+    conv_structure.symmetrize()
     cb = CifBlock()
-    _add_header(structure, cb)
-    _add_cell_loop(structure, cb)
-    _add_symmetry_loop(structure, cb, wrap=wrap)
-    _add_comp_loop(structure, cb)
+    _add_header(conv_structure, cb)
+    _add_cell_loop(conv_structure, cb)
+    _add_symmetry_loop(conv_structure, cb, wrap=wrap)
+    _add_comp_loop(conv_structure, cb)
     return cb
 
 
@@ -323,7 +319,7 @@ def write(structures, filename=None, wrap=False, **kwargs):
     Write a structure or list of structures to a cif file.
 
     Arguments:
-        structures: 
+        structures:
             A :mod:`~qmpy.Structure` object or list of objects. If supplied
             with several Structures, they will all be written to the same cif.
 
@@ -372,7 +368,9 @@ def read(cif_file, grammar=None):
         cf = ReadCif(cif_file)
     structures = []
     for key in list(cf.keys()):
-        structures.append(_read_cif_block(cf[key]))
+        s = _read_cif_block(cf[key])
+        s.symmetrize()
+        structures.append(s)
     if len(structures) == 1:
         return structures[0]
     else:
