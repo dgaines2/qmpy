@@ -14,6 +14,7 @@ import random
 import subprocess
 from collections import defaultdict
 import logging
+from fractions import Fraction
 
 from django.db import models
 from django.db import transaction
@@ -583,7 +584,7 @@ class Structure(models.Model, object):
          * orbits -> lists of equivalent Atoms
          * rotations -> List of rotation operations
          * translations -> List of translation operations
-         * operatiosn -> List of (rotation,translation) pairs
+         * operations -> List of (rotation,translation) pairs
          * for each atom: atom.wyckoff -> WyckoffSite
          * for each site: site.multiplicity -> int
 
@@ -608,7 +609,6 @@ class Structure(models.Model, object):
             origins[i] = e
             orbits[e].append(self.sites[i])
         self.origins = origins
-        self.operations = list(zip(dataset["rotations"], dataset["translations"]))
         rots = []
         for r in dataset["rotations"]:
             if not any([np.allclose(r, x) for x in rots]):
@@ -616,9 +616,14 @@ class Structure(models.Model, object):
         self.rotations = rots
         trans = []
         for t in dataset["translations"]:
+            t = np.abs(
+                [float(Fraction.from_float(c).limit_denominator(1000)) for c in t]
+            )
+            t[t == 1] = 0
             if not any([np.allclose(t, x) for x in trans]):
-                trans.append(t)
+                trans.append(t.tolist())
         self.translations = trans
+        self.operations = list(zip(rots, trans))
         self.orbits = list(orbits.values())
         ##self.duplicates = dict((self.sites[e], v) for e, v in orbits.items())
         ## See comment about hashes and Dictionary keys
